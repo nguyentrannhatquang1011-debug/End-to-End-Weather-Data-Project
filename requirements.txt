@@ -1,0 +1,12 @@
+# --- Utilities & Security ---
+python-dotenv==1.0.1
+requests==2.31.0
+
+# --- Data Processing ---
+pandas==2.2.1
+
+# --- Streaming (Kafka) ---
+confluent-kafka==2.3.0
+
+# --- Time-series Database ---
+influxdb-client==1.36.0

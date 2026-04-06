@@ -1,0 +1,18 @@
+# BẢO MẬT - TUYỆT ĐỐI KHÔNG ĐƯỢC ĐẨY LÊN
+.env
+
+# Môi trường ảo cục bộ (Không cần thiết đẩy lên vì mỗi máy tự cài đặt)
+.venv/
+env/
+
+# Dữ liệu cục bộ & Log (Dung lượng lớn, thay đổi liên tục)
+data/
+logs/
+*.parquet
+*.json
+*.csv
+
+# File rác do Python và hệ điều hành sinh ra
+__pycache__/
+*.pyc
+.DS_Store
