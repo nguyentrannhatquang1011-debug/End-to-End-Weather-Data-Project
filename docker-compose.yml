@@ -1,0 +1,223 @@
+# ==============================================================================
+# KHỐI CẤU HÌNH DÙNG CHUNG (YAML ANCHORS): x-airflow-common
+# Đây là "bản mẫu" (template) chứa các cấu hình chung cho các dịch vụ của Airflow.
+# Giúp tuân thủ nguyên tắc DRY (Don't Repeat Yourself) - Không lặp lại code.
+# ==============================================================================
+x-airflow-common:
+  # Dấu &airflow-common: Nghĩa là "Hãy đánh dấu toàn bộ khối cấu hình này bằng cái tên airflow-common".
+  &airflow-common
+  # Yêu cầu Docker tự động build image dựa trên file 'Dockerfile' nằm ở thư mục hiện tại (.)
+  build: .
+  
+  # Khai báo file chứa biến môi trường để Docker đẩy vào bên trong Container
+  env_file:
+    - .env
+
+  # Các biến môi trường dùng chung cho cả Scheduler và Webserver
+  environment:
+    &airflow-common-env
+    # Sử dụng LocalExecutor (phù hợp với máy RAM/CPU vừa phải, chạy task trên các process con)
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    
+    # Thêm biến môi trường proxy vào đây để các container Airflow có thể sử dụng
+    #HTTP_PROXY: ${HTTP_PROXY:-}
+    #HTTPS_PROXY: ${HTTPS_PROXY:-}
+
+    # Chuỗi kết nối tới cơ sở dữ liệu PostgreSQL (Tự động lấy user/pass từ file .env)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres/${POSTGRES_DB:-airflow}
+    # Tắt việc tự động tải các ví dụ (DAGs mẫu) của Airflow cho nhẹ máy
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    
+  # Volumes: Gắn kết (mount) thư mục trên máy thật vào bên trong container (Chống mất dữ liệu)
+  # Cú pháp: [Thư mục máy thật]:[Thư mục trong container]
+  volumes:
+    - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags       # Nơi chứa code quản lý DAGs
+    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs       # Nơi lưu lịch sử chạy task
+    - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins # Nơi chứa custom operators
+    - ${AIRFLOW_PROJ_DIR:-.}/scripts:/opt/airflow/scripts # Nơi chứa script Python (VD: Luồng Streaming)
+    
+    # Gắn thư mục tạm của Spark ra máy thật để tránh làm phình ổ đĩa Docker (.vhdx)
+    # Khi Spark xóa file tạm, dung lượng sẽ được trả lại trực tiếp cho Windows.
+    - ${AIRFLOW_PROJ_DIR:-.}/data/spark-temp:/opt/airflow/spark_temp
+
+  
+  # Lấy AIRFLOW_UID từ .env, nếu không có thì mặc định là 50000. Gắn User này vào container để đảm bảo quyền truy cập file đúng đắn.
+  # cú pháp ${BIEN_MOI_TRUONG:-gia_tri_mac_dinh} được dùng để làm cho file cấu hình của bạn "thông minh" và linh hoạt hơn.
+  #     - Nếu bạn đã có biến AIRFLOW_UID=1000 trong file .env: Docker sẽ bốc số 1000 ra và gán đó ra để dùng.
+  #     - Nếu bạn chưa có biến AIRFLOW_UID trong file .env: Docker sẽ tự động dùng số 50000 làm User ID mặc định.
+  user: "${AIRFLOW_UID:-50000}:0" 
+  # 0: Là mã định danh của nhóm (GID) root. 
+  # Việc gán GID này giúp container có quyền truy cập vào các thư mục được mount từ máy thật mà không bị lỗi phân quyền (Permission Denied).
+  
+
+  # Kết nối vào mạng nội bộ chung của toàn dự án
+  # Giúp Kafka có thể "nói chuyện" trực tiếp với các service khác trong cùng file compose (như Airflow, InfluxDB) 
+  #   bằng tên gọi (ví dụ: http://kafka:9092) thay vì phải dùng địa chỉ IP phức tạp. "Cổng_Máy_Tính_Của_Bạn : Cổng_Bên_Trong_Docker"
+  networks:
+    - pipeline-network
+
+# ==============================================================================
+# KHAI BÁO CÁC SERVICES - 6 Dịch vụ cần thiết cho hệ thống Data Pipeline
+# ==============================================================================
+services:
+  # ----------------------------------------------------------------------------
+  # 1. PostgreSQL: Não bộ lưu trữ siêu dữ liệu (Metadata) cho Airflow
+  # ----------------------------------------------------------------------------
+  postgres:
+    # Sử dụng PostgreSQL để lưu trữ Metadata cho Airflow.
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-airflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airflow}
+      POSTGRES_DB: ${POSTGRES_DB:-airflow}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airflow} -d ${POSTGRES_DB:-airflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      # Lưu trữ dữ liệu vật lý của DB ra ổ cứng thật của hệ điều hành
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - pipeline-network
+
+  # ----------------------------------------------------------------------------
+  # 1.5. Airflow Init: Khởi tạo database và tạo user (Chỉ chạy một lần duy nhất)
+  # ----------------------------------------------------------------------------
+  airflow-init:
+    <<: *airflow-common
+    command: version # Lệnh dummy để container này khởi động và chạy xong ngay lập tức (Chỉ dùng để khởi tạo PostgresDB)
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_UPGRADE: 'true' # Tự động chạy lệnh 'airflow db upgrade' để tạo bảng trong Postgres khi container khởi động
+      _AIRFLOW_WWW_USER_CREATE: 'true' # Tự động tạo user admin để đăng nhập vào Airflow Webserver
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ----------------------------------------------------------------------------
+  # 2. Airflow Scheduler: Trái tim điều phối, lên lịch và kích hoạt các DAG Batch
+  # ----------------------------------------------------------------------------
+  airflow-scheduler:
+    # Cú pháp kế thừa: Dán toàn bộ cấu hình từ bản mẫu 'x-airflow-common' ở trên xuống đây
+    <<: *airflow-common
+    # Ra lệnh cho container này chạy chức năng lên lịch.
+    command: scheduler
+    # Tùy chọn vòng đời: Chỉ khởi động Scheduler SAU KHI database Postgres đã sẵn sàng
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+  # ----------------------------------------------------------------------------
+  # 3. Airflow Webserver: Giao diện người dùng (UI) để theo dõi tình trạng Pipeline
+  # ----------------------------------------------------------------------------
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      # ports: Là cánh cửa nối giữa "Thế giới bên trong Docker" và "Máy tính Windows của bạn".
+      # Cú pháp luôn là "Cổng_Máy_Tính_Của_Bạn : Cổng_Bên_Trong_Docker".
+      # Mở cổng 8080 ra máy tính thật. Truy cập từ Chrome/Edge bằng: http://localhost:8080
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment:
+      <<: *airflow-common-env
+
+  # ----------------------------------------------------------------------------
+  # 4. Apache Kafka (KRaft mode): Môi giới (Broker) cho luồng dữ liệu Streaming (Thời gian thực)
+  # ----------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.7.0
+    ports:
+      - "9092:9092"
+    environment:
+      # Cấu hình Kafka chạy ở chế độ KRaft (Tự quản lý cluster, KHÔNG CẦN Zookeeper để tiết kiệm RAM)
+
+      - KAFKA_NODE_ID=1 # ID duy nhất cho broker này trong cluster
+      - KAFKA_PROCESS_ROLES=broker,controller # Định nghĩa vai trò của node này: vừa là broker (xử lý dữ liệu) vừa là controller (quản lý cluster)
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 # Lắng nghe cả hai loại kết nối: PLAINTEXT cho client (Spark, Airflow) và CONTROLLER cho giao tiếp nội bộ cluster
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092 # Địa chỉ mà client sẽ dùng để kết nối (Sử dụng tên dịch vụ 'kafka' để Docker tự động ánh xạ IP)
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 # Vì chỉ có 1 broker, nên replication factor phải là 1 để tránh lỗi khởi động cluster
+      - KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS=1 # Số phân vùng cho topic lưu trữ offset (đơn giản hóa cho môi trường dev)
+
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT # Cấu hình giao thức bảo mật cho từng listener (ở đây đều là PLAINTEXT vì môi trường dev)
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093 # Cấu hình để node này tự bầu làm controller duy nhất trong cluster KRaft
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER # Chỉ định listener nào dùng cho giao tiếp controller (ở đây là CONTROLLER)
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT # Chỉ định listener mà các broker sẽ dùng để giao tiếp với nhau (ở đây là PLAINTEXT vì chỉ có 1 broker)
+
+      #======== QUAN TRỌNG: ĐỊNH HƯỚNG DỮ LIỆU VÀO VOLUME============
+      # Thay vì mặc định ghi log vào /tmp/kafka-logs (đây là mặc định của nhiều bản phân phối Kafka), 
+      #   thì khi Container tắt đi, dữ liệu trong /tmp sẽ bay màu sạch sẽ.
+      # Mất thông tin về các topic, partition, offset đã có, dẫn đến việc phải tạo lại topic và mất dữ liệu cũ mỗi lần khởi động lại container.
+      - KAFKA_LOG_DIRS=/var/lib/kafka/data
+
+      # CẤU HÌNH RETENTION (Lưu trữ tin nhắn)
+      - KAFKA_LOG_RETENTION_HOURS=24 # Xóa dữ liệu cũ sau 24 giờ
+      - KAFKA_LOG_RETENTION_BYTES=1073741824 # Hoặc xóa nếu dung lượng topic vượt quá 1GB (1024^3 bytes)
+      - KAFKA_LOG_SEGMENT_BYTES=104857600 # Chia nhỏ các file log (100MB) để dễ dàng xóa bỏ các phân đoạn cũ
+    volumes:
+      # Lưu trữ các Message (sự kiện) của Kafka ra ổ cứng thật
+      - ./data/kafka:/var/lib/kafka/data
+    networks:
+      - pipeline-network
+
+  # ----------------------------------------------------------------------------
+  # 5. MinIO: Tầng lưu trữ Data Lakehouse (S3-compatible Object Storage)
+  # Nơi chứa các file JSON (Bronze Zone) và Parquet/Iceberg (Silver/Gold Zone)
+  # ----------------------------------------------------------------------------
+  minio:
+    image: minio/minio
+    ports:
+      # Cổng 9000: Dành riêng cho code Spark/Python kết nối (API)
+      - "9000:9000" 
+      # Cổng 9001: Dành cho giao diện quản lý UI. Truy cập bằng: http://localhost:9001
+      - "9001:9001" 
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}         
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD} 
+    # Lệnh khởi chạy server và bắt buộc mở cổng giao diện web
+    command: server /data --console-address ":9001"
+    volumes:
+      # Khu vực lưu trữ file vật lý của Data Lakehouse
+      - ./data/minio:/data
+    networks:
+      - pipeline-network
+
+  # ----------------------------------------------------------------------------
+  # 6. InfluxDB: Cơ sở dữ liệu chuỗi thời gian (Time-series DB) cho Streaming
+  # Tối ưu hóa cho việc ghi tốc độ cao và vẽ biểu đồ thời tiết liên tục
+  # ----------------------------------------------------------------------------
+  influxdb:
+    image: influxdb:2.7
+    ports:
+      # Mở cổng 8086. Truy cập UI quản trị bằng: http://localhost:8086
+      - "8086:8086" 
+    environment:
+      # Các thông số tự động khởi tạo Organization và Bucket lần đầu (Lấy từ .env)
+      DOCKER_INFLUXDB_INIT_MODE: ${INFLUXDB_INIT_MODE}
+      DOCKER_INFLUXDB_INIT_USERNAME: ${INFLUXDB_INIT_USERNAME}
+      DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUXDB_INIT_PASSWORD}
+      DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_INIT_ORG}
+      DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_INIT_BUCKET}
+    volumes:
+      # Lưu trữ dữ liệu InfluxDB ra máy tính thật
+      - ./data/influxdb:/var/lib/influxdb2
+    networks:
+      - pipeline-network
+
+# ==============================================================================
+# KHAI BÁO MẠNG (NETWORKS)
+# ==============================================================================
+networks:
+  pipeline-network:
+    # Chế độ bridge tạo ra một mạng LAN ảo riêng biệt bên trong Docker
+    # Giúp các thành phần như Spark, Kafka, Postgres có thể kết nối với nhau bằng TÊN (hostname) thay vì IP
+    driver: bridge
