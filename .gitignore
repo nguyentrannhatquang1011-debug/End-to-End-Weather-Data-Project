@@ -12,8 +12,14 @@ logs/
 *.parquet
 *.json
 *.csv
+# Spark/Ivy - Cache thư viện Jar
+.ivy2/
 
 # File rác do Python và hệ điều hành sinh ra
 __pycache__/
 *.pyc
+
+# 5. OS & IDE
 .DS_Store
+.vscode/
+.idea/

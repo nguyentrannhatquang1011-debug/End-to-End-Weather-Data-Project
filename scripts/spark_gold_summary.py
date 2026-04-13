@@ -205,7 +205,7 @@ if __name__ == "__main__":
     # =========================================================================
     parser = argparse.ArgumentParser(description="Spark Gold Layer - Pre-aggregation Job")
     
-    # Bỏ 'required=True' cho phép script tự chạy toàn bộ luồng nếu không truyền tham số.
+    # Không có 'required=True' cho phép script tự chạy toàn bộ luồng nếu không truyền tham số.
     parser.add_argument(
         "--type", 
         choices=["weather", "aqi", "all"], 
@@ -235,20 +235,3 @@ if __name__ == "__main__":
             start_date=args.start_date, 
             end_date=args.end_date
         )
-
-"""
-GIẢI THÍCH CHI TIẾT WORKFLOW:
-
-1. Tại sao dùng Gold Layer? 
-   Bảng Silver chứa dữ liệu chi tiết theo từng 15 phút. Nếu dashboard vẽ biểu đồ theo tháng, 
-   Spark/DuckDB phải quét hàng nghìn file Parquet. Bảng Gold tổng hợp sẵn theo ngày 
-   giúp giảm số lượng bản ghi xuống 1/96 (với dữ liệu 15 phút), cực kỳ tiết kiệm RAM.
-
-2. Logic Idempotency:
-   Sử dụng MERGE INTO dựa trên (station_id + date). Nếu bạn chạy lại job cho một ngày 
-   đã có dữ liệu (do dữ liệu Silver được bổ sung muộn), kết quả Gold sẽ được cập nhật mới nhất.
-
-3. Partitioning:
-   Tại Gold Layer, dữ liệu đã rất gọn, nên chúng ta phân vùng theo years(date) 
-   thay vì days(date) để tránh tạo ra quá nhiều thư mục nhỏ (Small File Problem).
-"""

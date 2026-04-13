@@ -89,7 +89,7 @@ with DAG(
     SPARK_SUBMIT_CMD = (
         f"spark-submit --master local[6] "
         f"--packages {PACKAGES} "
-        f"--conf spark.jars.ivy=/home/airflow/.ivy2 "
+        f"--conf spark.jars.ivy=/opt/airflow/spark_ivy "
         # Giới hạn RAM tối đa cho Spark Driver (trong Local mode, Driver bao gồm luôn Executor).
         # Việc đặt 4G giúp ngăn Spark "vắt kiệt" RAM của máy host 16GB.
         f"--driver-memory 4g "
@@ -104,6 +104,7 @@ with DAG(
         # QUAN TRỌNG: Thư mục này phải khớp với đường dẫn đã mount trong docker-compose.yml 
         # và đã được phân quyền trong Dockerfile để tránh lỗi AccessDeniedException.
         f"--conf spark.local.dir=/opt/airflow/spark_temp "
+        f"--conf spark.sql.shuffle.partitions=6 "
     )
 
     silver_weather_task = BashOperator(

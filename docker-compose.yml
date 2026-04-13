@@ -40,6 +40,9 @@ x-airflow-common:
     # Khi Spark xóa file tạm, dung lượng sẽ được trả lại trực tiếp cho Windows.
     - ${AIRFLOW_PROJ_DIR:-.}/data/spark-temp:/opt/airflow/spark_temp
 
+    # Tách riêng thư mục Ivy Cache để lưu trữ thư viện JAR vĩnh viễn, tránh bị xóa nhầm khi dọn dẹp spark-temp
+    #- ${AIRFLOW_PROJ_DIR:-.}/data/spark-ivy:/opt/airflow/spark_ivy
+
   
   # Lấy AIRFLOW_UID từ .env, nếu không có thì mặc định là 50000. Gắn User này vào container để đảm bảo quyền truy cập file đúng đắn.
   # cú pháp ${BIEN_MOI_TRUONG:-gia_tri_mac_dinh} được dùng để làm cho file cấu hình của bạn "thông minh" và linh hoạt hơn.
@@ -212,6 +215,33 @@ services:
       - ./data/influxdb:/var/lib/influxdb2
     networks:
       - pipeline-network
+
+  # ----------------------------------------------------------------------------
+  # 7. Streamlit Dashboard: Lớp hiển thị dữ liệu (Serving Layer)
+  # ----------------------------------------------------------------------------
+  streamlit-dashboard:
+    # Kế thừa cấu hình từ x-airflow-common để lấy các thiết lập về:
+    # - build (Dockerfile)
+    # - volumes (để thấy được thư mục scripts/)
+    # - user (để có quyền đọc/ghi file đồng nhất)
+    # - networks
+    <<: *airflow-common
+    container_name: streamlit_dashboard
+    # QUAN TRỌNG: Reset entrypoint để tránh việc Image Airflow tự động 
+    # chèn thêm tiền tố 'airflow' vào trước lệnh khởi chạy Dashboard.
+    entrypoint: []
+    # Ghi đè lệnh khởi chạy mặc định của image Airflow sang Streamlit
+    command: streamlit run scripts/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    depends_on:
+      influxdb:
+        condition: service_started
+      minio:
+        condition: service_started
+    # Ghi đè environment để tránh các biến không cần thiết của Airflow làm nặng container (tùy chọn)
+    environment:
+      <<: *airflow-common-env
 
 # ==============================================================================
 # KHAI BÁO MẠNG (NETWORKS)

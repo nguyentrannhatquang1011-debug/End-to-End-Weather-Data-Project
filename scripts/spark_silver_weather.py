@@ -104,15 +104,26 @@ def run_weather_silver_transformation(start_date: Optional[str] = None, end_date
     #   - Vì Spark có thể nhận nhiều đường dẫn cùng lúc, giúp chúng ta xử lý dữ liệu của nhiều ngày trong một lần chạy nếu cần.
     #   - Nếu Airflow DAG được cấu hình để chạy hàng ngày với một ngày cụ thể, chúng ta sẽ chỉ có một đường dẫn.
     #   - Nhưng nếu chúng ta muốn chạy một lần cho cả tháng, chúng ta có thể truyền nhiều ngày và Spark sẽ tự động quét tất cả các đường dẫn đó.
-    bronze_paths = []
-    current_dt = processing_start_dt
-    while current_dt <= processing_end_dt:
-        path = (
-            f"s3a://bronze/weather/year={current_dt.year}/month={current_dt.month:02d}/"
-            f"day={current_dt.day:02d}/*.json"
-        )
-        bronze_paths.append(path) 
-        current_dt += timedelta(days=1)
+    
+    # Tính toán số ngày cần xử lý
+    diff_days = (processing_end_dt - processing_start_dt).days
+
+    if diff_days > 30:
+        # Chế độ Initial Load: Sử dụng Wildcard toàn cục (Globbing).
+        # Điều này giúp Spark tự tìm các file tồn tại mà không bị crash khi gặp folder trống (lỗi PATH_NOT_FOUND).
+        bronze_paths = ["s3a://bronze/weather/year=*/month=*/day=*/*.json"]
+        logger.info("Phát hiện Initial Load: Sử dụng wildcard pattern để quét toàn bộ Bronze Layer.")
+    else:
+        # Chế độ Daily/Backfill: Sử dụng đường dẫn cụ thể để tối ưu hóa hiệu năng liệt kê tệp của S3.
+        bronze_paths = []
+        current_dt = processing_start_dt
+        while current_dt <= processing_end_dt:
+            path = (
+                f"s3a://bronze/weather/year={current_dt.year}/month={current_dt.month:02d}/"
+                f"day={current_dt.day:02d}/*.json"
+            )
+            bronze_paths.append(path) 
+            current_dt += timedelta(days=1)
 
     if not bronze_paths:
         logger.warning("Không có đường dẫn Bronze nào được tạo dựa trên phạm vi ngày. Job kết thúc.")
@@ -121,9 +132,11 @@ def run_weather_silver_transformation(start_date: Optional[str] = None, end_date
 
     try:
         # ========== Bước 1.1. Đọc dữ liệu JSON từ các đường dẫn Bronze đã được xác định ==========
-        df_raw = spark.read.json(*bronze_paths) # Spark có thể nhận nhiều đường dẫn từ bronze_paths, giúp chúng ta xử lý dữ liệu của nhiều ngày trong một lần chạy nếu cần.
-        # Vì sao lại là *bronze_paths mà không phải là bronze_paths?
-        #   - * (splat operator) trong Python được sử dụng để "giảinén" một list thành các đối số riêng biệt khi gọi một hàm.   
+        # Param: '*bronze_paths' mà không phải là bronze_paths?
+        #   - * (splat operator) trong Python được sử dụng để "giảinén" một list thành các đối số riêng biệt khi gọi một hàm.  
+        # Truyền trực tiếp list bronze_paths thay vì dùng toán tử giải nén (*).
+        # Điều này giúp tránh lỗi vượt quá giới hạn đối số (TypeError) khi xử lý Initial Load nhiều năm (hàng nghìn file).
+        df_raw = spark.read.json(bronze_paths)
 
         # read.json() sẽ tự động infer schema và tạo DataFrame với cấu trúc bảng lồng nhau.
         # Vì sao trên lại là một cấu trúc bảng lồng nhau (nested table structure):
@@ -231,9 +244,24 @@ def run_weather_silver_transformation(start_date: Optional[str] = None, end_date
 
         # =============================================================================
         # Bước 4. Lọc dữ liệu: Chỉ giữ lại dữ liệu lịch sử (<= thời điểm hiện tại)
-        # Điều này loại bỏ các dữ liệu dự báo (Forecast) có trong API response
-        df_final = df_cleaned.filter(F.col("timestamp") <= F.current_timestamp())
+        # Đảm bảo dữ liệu nằm trong khoảng thời gian yêu cầu (quan trọng khi dùng wildcard ở Bước 1.1)
+        st_str = processing_start_dt.strftime("%Y-%m-%d")
+        en_str = processing_end_dt.strftime("%Y-%m-%d")
         
+        df_final = df_cleaned.filter(
+            F.to_date("timestamp").between(st_str, en_str)
+        ).filter(
+            # Loại bỏ các dữ liệu dự báo (Forecast) có trong API response
+            F.col("timestamp") <= F.current_timestamp()
+        )
+
+        # Tối ưu hóa ghi: Gom nhóm theo ngày và sắp xếp. 
+        # Việc này cực kỳ quan trọng để tránh OOM khi xử lý nhiều năm dữ liệu.
+        df_final = df_final.repartition(6, F.date_trunc("day", F.col("timestamp"))) \
+                           .sortWithinPartitions("timestamp")
+        # sortWithinPartitions("timestamp"): Khi dữ liệu được sắp xếp theo cột partition (timestamp), 
+        # - Spark sẽ ghi xong toàn bộ dữ liệu của ngày 01/01/2020, đóng file lại, rồi mới mở file cho ngày 02/01/2020. 
+        # - Điều này giải phóng bộ nhớ buffer ngay lập tức, triệt tiêu lỗi OutOfMemory.
 
         # =============================================================================
         # Bước 5. GHI DỮ LIỆU/MERGE INTO VÀO ICEBERG (Tính lũy đẳng - Idempotency)
@@ -333,5 +361,4 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
 
-    # Gọi hàm chuyển đổi với các tham số ngày được truyền từ dòng lệnh.
     run_weather_silver_transformation(start_date=args.start_date, end_date=args.end_date)

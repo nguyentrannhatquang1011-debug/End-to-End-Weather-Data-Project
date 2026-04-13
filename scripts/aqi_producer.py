@@ -161,19 +161,14 @@ def run_producer() -> None:
                 time.sleep(POLL_INTERVAL)
                 
             except Exception as e:
-                # khi một Exception được bắt (catch) bởi khối except, chương trình coi như lỗi đó đã được xử lý xong. 
-                # Nếu bên trong khối except bạn không có lệnh break (để thoát vòng lặp) hoặc raise (để đẩy lỗi ra ngoài cấp cao hơn), 
-                # thì vòng lặp sẽ tiếp tục chu kỳ tiếp theo một cách bình thường.
                 logger.error(f"Lỗi trong chu kỳ AQI: {e}")
                 time.sleep(POLL_INTERVAL) # Nghỉ 5 phút nếu có lỗi
                 
     except KeyboardInterrupt:
         logger.info("Đang đóng AQI Producer...")
     finally:
-        # Đảm bảo các tin nhắn AQI cuối cùng được ACK bởi Kafka Broker
         producer.flush(timeout=5)
         
-        # Giải phóng Connection Pool của requests.Session
         http_session.close()
         logger.info("Đã đóng các kết nối AQI an toàn.")
 

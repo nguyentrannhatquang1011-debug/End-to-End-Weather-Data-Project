@@ -215,7 +215,7 @@ def extract_weather(start_date: Optional[str] = None, end_date: Optional[str] = 
 
 def extract_aqi(start_date: Optional[str] = None, end_date: Optional[str] = None) -> None:
     """
-    Workflow trích xuất dữ liệu chất lượng không khí (AQI):
+    Trích xuất dữ liệu chất lượng không khí (AQI):
     Sử dụng Open-Meteo Air Quality API để thay thế cho AQICN API trong luồng Batch 
     nhằm hỗ trợ lấy dữ liệu lịch sử (Historical Data).
     

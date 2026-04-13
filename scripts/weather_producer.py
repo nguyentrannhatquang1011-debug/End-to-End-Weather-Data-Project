@@ -174,6 +174,9 @@ def run_producer() -> None:
                 time.sleep(POLL_INTERVAL)
                 
             except Exception as e:
+                # khi một Exception được bắt (catch) bởi khối except, chương trình coi như lỗi đó đã được xử lý xong. 
+                # Nếu bên trong khối except bạn không có lệnh break (để thoát vòng lặp) hoặc raise (để đẩy lỗi ra ngoài cấp cao hơn), 
+                # thì vòng lặp sẽ tiếp tục chu kỳ tiếp theo một cách bình thường.
                 logger.error(f"Lỗi trong chu kỳ xử lý: {e}")
                 time.sleep(POLL_INTERVAL)
                 
@@ -181,6 +184,7 @@ def run_producer() -> None:
         # Xử lý khi người dùng nhấn Ctrl+C hoặc Docker gửi tín hiệu dừng (SIGINT)
         logger.info("Đang dừng script (Graceful Shutdown)...")
     finally:
+        # Đảm bảo tất cả tin nhắn đã được gửi đi trước khi đóng kết nối
         producer.flush(timeout=5)
 
         # HTTP Session: Đóng Connection Pool để giải phóng các socket TCP đang mở.

@@ -59,16 +59,23 @@ def run_aqi_silver_transformation(start_date: Optional[str] = None, end_date: Op
         processing_start_dt = yesterday
         processing_end_dt = yesterday
 
-    # Xây dựng list đường dẫn (Wildcard theo ngày)
-    bronze_paths = []
-    current_dt = processing_start_dt
-    while current_dt <= processing_end_dt:
-        path = (
-            f"s3a://bronze/aqi/year={current_dt.year}/month={current_dt.month:02d}/"
-            f"day={current_dt.day:02d}/*.json"
-        )
-        bronze_paths.append(path)
-        current_dt += timedelta(days=1)
+    # Xây dựng danh sách đường dẫn dựa trên khối lượng dữ liệu
+    diff_days = (processing_end_dt - processing_start_dt).days
+
+    if diff_days > 30:
+        # Sử dụng wildcard để xử lý Initial Load AQI nhiều năm, tránh lỗi missing partitions.
+        bronze_paths = ["s3a://bronze/aqi/year=*/month=*/day=*/*.json"]
+        logger.info("AQI Silver: Sử dụng wildcard pattern cho Initial Load.")
+    else:
+        bronze_paths = []
+        current_dt = processing_start_dt
+        while current_dt <= processing_end_dt:
+            path = (
+                f"s3a://bronze/aqi/year={current_dt.year}/month={current_dt.month:02d}/"
+                f"day={current_dt.day:02d}/*.json"
+            )
+            bronze_paths.append(path)
+            current_dt += timedelta(days=1)
 
     if not bronze_paths:
         logger.warning("Không tìm thấy đường dẫn dữ liệu AQI hợp lệ.")
@@ -79,7 +86,8 @@ def run_aqi_silver_transformation(start_date: Optional[str] = None, end_date: Op
         # =========================================================================
         # BƯỚC 2: ĐỌC VÀ XỬ LÝ FLATTENING
         # =========================================================================
-        df_raw = spark.read.json(*bronze_paths)
+        # Truyền list thay vì unpacking để hỗ trợ Initial Load số lượng lớn đường dẫn.
+        df_raw = spark.read.json(bronze_paths)
 
         if df_raw.rdd.isEmpty():
             logger.warning("Dữ liệu Bronze AQI trống. Job dừng.")
@@ -120,9 +128,19 @@ def run_aqi_silver_transformation(start_date: Optional[str] = None, end_date: Op
         # =========================================================================
         # BƯỚC 3: LỌC DỮ LIỆU & CHUẨN BỊ GHI
         # =========================================================================
-        # Chỉ giữ lại dữ liệu lịch sử (<= thời điểm hiện tại)
-        # Điều này loại bỏ các dữ liệu dự báo (Forecast) có trong API response
-        df_final = df_cleaned.filter(F.col("timestamp") <= F.current_timestamp())
+        # Lọc chính xác theo dải ngày yêu cầu và thời điểm hiện tại
+        st_str = processing_start_dt.strftime("%Y-%m-%d")
+        en_str = processing_end_dt.strftime("%Y-%m-%d")
+
+        df_final = df_cleaned.filter(
+            F.to_date("timestamp").between(st_str, en_str)
+        ).filter(
+            F.col("timestamp") <= F.current_timestamp()
+        )
+
+        # Phân phối lại dữ liệu theo ngày để mỗi Spark Task chỉ ghi vào 1 vài Partition Iceberg
+        df_final = df_final.repartition(6, F.date_trunc("day", F.col("timestamp"))) \
+                           .sortWithinPartitions("timestamp")
 
         # Khởi tạo DB và Table Iceberg cho AQI
         spark.sql("CREATE DATABASE IF NOT EXISTS weather_db")
@@ -185,11 +203,3 @@ if __name__ == "__main__":
 
     # Thực thi job
     run_aqi_silver_transformation(start_date=args.start_date, end_date=args.end_date)
-
-
-"""
-GHI CHÚ VỀ LOGIC:
-1. Dữ liệu AQI từ Open-Meteo trả về theo mảng (Array) tương tự Weather, do đó logic arrays_zip là tối ưu nhất.
-2. Chúng ta lưu PM2.5 và PM10 ở tầng Silver. Việc tính toán US-AQI index cụ thể sẽ được thực hiện ở tầng Gold.
-3. Iceberg tự động quản lý việc ghi file Parquet xuống MinIO và cập nhật metadata.
-"""
