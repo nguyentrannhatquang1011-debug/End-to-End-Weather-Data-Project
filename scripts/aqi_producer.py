@@ -34,10 +34,6 @@ def delivery_report(err: Optional[Exception], msg: Any) -> None:
     """
     Hàm callback báo cáo trạng thái gửi tin nhắn tới Kafka.
     
-    Workflow:
-    1. Được gọi khi Kafka Broker phản hồi (xác nhận đã nhận hoặc báo lỗi).
-    2. Nếu err không None: Ghi log lỗi để phục vụ monitoring.
-    3. Nếu thành công: Ghi log thông tin Topic và Partition.
     """
     if err is not None:
         logger.error(f"Gửi tin nhắn AQI thất bại: {err}")
@@ -107,7 +103,7 @@ def run_producer() -> None:
     topic = "aqi_live"
     
     # Tần suất lấy dữ liệu AQI: 300-600 giây vì AQI cập nhật rất chậm (theo giờ)
-    POLL_INTERVAL = 200 
+    POLL_INTERVAL = 300 # 5 phút
 
     # Cấu hình Producer
     producer_config = {
@@ -156,13 +152,11 @@ def run_producer() -> None:
                 # Bước 4: Ép gửi ngay lập tức
                 producer.flush()
                 
-                # Nghỉ 200s
-                # Chỉ số AQI thường được các trạm quan trắc cập nhật theo giờ hoặc mỗi 30-60 phút.
                 time.sleep(POLL_INTERVAL)
                 
             except Exception as e:
                 logger.error(f"Lỗi trong chu kỳ AQI: {e}")
-                time.sleep(POLL_INTERVAL) # Nghỉ 5 phút nếu có lỗi
+                time.sleep(POLL_INTERVAL) # Nghỉ 7 phút nếu có lỗi
                 
     except KeyboardInterrupt:
         logger.info("Đang đóng AQI Producer...")

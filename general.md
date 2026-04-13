@@ -60,4 +60,4 @@ Hệ thống sử dụng cơ chế lai (Hybrid) để đảm bảo không thất
   - Viết script Backfill độc lập, sử dụng module biến đổi dữ liệu dùng chung, và ghi đè thẳng vào InfluxDB với mốc Timestamp gốc.
 - **Nguồn Dữ liệu Backfill cho Streaming:**
   - *Phục hồi dữ liệu ngày cũ:* Ưu tiên lấy dữ liệu từ SSOT (Single Source of Truth) là các file Parquet trong MinIO (Iceberg). Điều này tiết kiệm API Calls, tăng tốc I/O và đảm bảo tính nhất quán tuyệt đối giữa Batch và Streaming.
-  - *Phục hồi dữ liệu trong ngày (Intraday gap):* Khi dữ liệu chưa kịp vào MinIO, script tự động dự phòng bằng cách gọi tính năng "Past Hours" của API (của Open-Meteo) và tính năng tương tự của AQICN API để điền bù tức thì, đảm bảo Dashboard luôn liền mạch.
+  - *Phục hồi dữ liệu trong ngày (Intraday gap):* Khi dữ liệu chưa kịp vào MinIO, script tự động dự phòng bằng cách gọi tính năng "Past Hours" của API (i.e. trong Open-Meteo Weather, và Open-Meteo Air Quality) để điền bù tức thì, đảm bảo Dashboard luôn liền mạch.
