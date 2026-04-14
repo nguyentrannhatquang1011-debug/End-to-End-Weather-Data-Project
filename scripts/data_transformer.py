@@ -1,6 +1,11 @@
 import pandas as pd
+import numpy as np
 from typing import Dict, Any, Optional
 from datetime import datetime
+
+# =============================================================================
+# TRANSFORMERS CHO LUỒNG STREAMING (RAW API -> INFLUX POINT)
+# =============================================================================
 
 def transform_weather_data(raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
@@ -18,6 +23,7 @@ def transform_weather_data(raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]
     
     # Open-Meteo trả về format ISO8601 thiếu giây và offset (VD: 2024-03-27T10:00)
     # Ta cần thêm ':00' (giây) và '+07:00' (múi giờ Hà Nội) để InfluxDB hiểu đúng UTC.
+    # Đảm bảo sử dụng 24h format (ISO8601 mặc định của API là 24h).
     raw_time = current.get("time")
     formatted_time = f"{raw_time}:00+07:00" if raw_time else None
 
@@ -46,10 +52,11 @@ def transform_aqi_data(raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         
     # AQICN trả về epoch time (giây). 
     # Sử dụng pandas để chuyển đổi sang múi giờ Hà Nội một cách chuẩn xác.
+    # Định dạng đầu ra: YYYY-MM-DDTHH:mm:ss (Đảm bảo HH là 24h format)
     timestamp_v = data.get("time", {}).get("v")
     if timestamp_v:
         ts_obj = pd.to_datetime(timestamp_v, unit='s').tz_localize('UTC').tz_convert('Asia/Bangkok')
-        formatted_time = ts_obj.strftime('%Y-%m-%dT%H:%M:%S+07:00')
+        formatted_time = ts_obj.strftime('%Y-%m-%dT%H:%M:%S+07:00') # %H là 24h
     else:
         return None
     
@@ -60,4 +67,48 @@ def transform_aqi_data(raw_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "aqi": float(data.get("aqi", 0)),
         "lat": float(data.get("city", {}).get("geo", [0, 0])[0]),
         "lon": float(data.get("city", {}).get("geo", [0, 0])[1])
+    }
+
+# =============================================================================
+# TRANSFORMERS CHO LUỒNG BACKFILL (SILVER DF/ROW -> INFLUX POINT)
+# Giúp đồng nhất Schema giữa Batch và Streaming khi ghi vào InfluxDB.
+# =============================================================================
+
+def map_silver_to_influx_weather(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Ánh xạ một bản ghi Silver Weather sang Schema InfluxDB."""
+    # Đảm bảo location luôn là 'HaNoi' nếu station_id bị thiếu hoặc là NaN
+    station_id = row.get("station_id")
+    location = station_id if pd.notna(station_id) else "HaNoi"
+
+    return {
+        "measurement": "weather_metrics",
+        "tags": {"location": location},
+        "fields": {
+            "temperature": float(row["temperature"]),
+            "windspeed": float(row["windspeed"]),
+            "winddirection": float(row["winddirection"]),
+            "weathercode": int(row["weathercode"])
+        },
+        "time": row["timestamp"]
+    }
+
+def map_silver_to_influx_aqi(row: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Ánh xạ một bản ghi Silver AQI sang Schema InfluxDB.
+    Bổ sung station_name mặc định để khớp với tag của luồng Live.
+    """
+    # Đảm bảo location luôn là 'HaNoi' nếu station_id bị thiếu hoặc là NaN
+    station_id = row.get("station_id")
+    location = station_id if pd.notna(station_id) else "HaNoi"
+
+    return {
+        "measurement": "aqi_metrics",
+        "tags": {
+            "location": location,
+            "station_name": "Hà Nội: Công viên Nhân Chính - Khuất Duy Tiến (KK)" # Tên trạm mặc định cho dữ liệu lịch sử
+        },
+        "fields": {
+            "aqi": float(row["aqi"])
+        },
+        "time": row["timestamp"]
     }

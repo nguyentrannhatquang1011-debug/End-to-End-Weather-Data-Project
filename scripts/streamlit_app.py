@@ -150,7 +150,7 @@ if auto_refresh:
     # Component này sẽ kích hoạt rerun script từ phía Client-side
     st_autorefresh(interval=refresh_interval * 1000, key="data_refresh_timer")
 
-tab_selection = st.sidebar.radio("Chọn trang hiển thị:", ["Dữ liệu Thời tiết Live", "Chất lượng Không khí Live", "Gold Insights (Tổng hợp)"])
+tab_selection = st.sidebar.radio("Chọn trang hiển thị:", ["Dữ liệu Thời tiết Live", "Chất lượng Không khí Live", "Phân tích dữ liệu lịch sử"])
 
 
 # -----------------------------------------------------------------------------
@@ -297,7 +297,7 @@ elif tab_selection == "Chất lượng Không khí Live":
 # TRANG 3: GOLD INSIGHTS
 # -----------------------------------------------------------------------------
 else:
-    st.title("🏆 Gold Layer Insights (Phân tích Tổng hợp)")
+    st.title("🏆 Phân tích dữ liệu lịch sử (Gold Layer)")
     st.markdown("Dữ liệu được trích xuất trực tiếp từ **Lakehouse Gold Layer (Iceberg Format)** trên MinIO.")
 
     # A. Metric Cards (Records)

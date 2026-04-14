@@ -1,6 +1,6 @@
 # BẢO MẬT - TUYỆT ĐỐI KHÔNG ĐƯỢC ĐẨY LÊN
-#.env
-#general.md
+.env
+general.md
 
 # Môi trường ảo cục bộ (Không cần thiết đẩy lên vì mỗi máy tự cài đặt)
 .venv/

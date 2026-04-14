@@ -1,5 +1,6 @@
 from airflow import DAG
 from airflow.operators.bash import BashOperator
+from airflow.models.param import Param
 from datetime import datetime, timedelta
 
 # =============================================================================
@@ -26,15 +27,35 @@ with DAG(
     start_date=datetime(2020, 1, 1),
     # catchup=False: Không tự động tạo các lượt chạy bù (Backfill) theo từng ngày.
     catchup=False,
+    # Khai báo Params để tạo Form nhập liệu trên giao diện Airflow
+    params={
+        "start_date": Param(
+            default='2020-01-01',
+            type="string",
+            format="date",
+            description="Ngày bắt đầu nạp dữ liệu (YYYY-MM-DD)"
+        ),
+        "end_date": Param(
+            default='2026-03-31',
+            type="string",
+            format="date",
+            description="Ngày kết thúc nạp dữ liệu (YYYY-MM-DD)"
+        ),
+    },
+    render_template_as_native_obj=True,
     tags=['initial_load', 'manual', 'batch'],
     max_active_runs=1,
 ) as dag:
 
     SCRIPTS_PATH = "/opt/airflow/scripts"
     
-    # Định nghĩa khoảng thời gian cố định cho Initial Load
-    START_DATE = "2020-01-01"
-    END_DATE = "2026-03-31"
+    # =========================================================================
+    # CẤU HÌNH NHẬN THAM SỐ TỪ USER (JINJA TEMPLATES)
+    # =========================================================================
+    # Khi nhấn nút Trigger (Play), Airflow sẽ hiển thị Form dựa trên khai báo 'params' ở trên.
+    
+    START_DATE = "{{ params.start_date }}"
+    END_DATE = "{{ params.end_date }}"
 
     # Cấu hình Spark Submit (Tối ưu RAM 16GB và Scratch Space ra Host Volume)
     ICEBERG_VERSION = "1.5.0"

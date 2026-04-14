@@ -62,11 +62,10 @@ def run_aqi_silver_transformation(start_date: Optional[str] = None, end_date: Op
     # Xây dựng danh sách đường dẫn dựa trên khối lượng dữ liệu
     diff_days = (processing_end_dt - processing_start_dt).days
 
-    if diff_days > 30:
-        # Sử dụng wildcard để xử lý Initial Load AQI nhiều năm, tránh lỗi missing partitions.
+    if diff_days > 30: # Nếu phạm vi ngày lớn hơn 30 ngày, có thể là Initial Load dài hạn, sử dụng wildcard để tránh lỗi missing partitions.
         bronze_paths = ["s3a://bronze/aqi/year=*/month=*/day=*/*.json"]
         logger.info("AQI Silver: Sử dụng wildcard pattern cho Initial Load.")
-    else:
+    else: # Sử dụng list cụ thể để tối ưu cho Backfill ngắn hạn, tránh đọc thừa dữ liệu không cần thiết.
         bronze_paths = []
         current_dt = processing_start_dt
         while current_dt <= processing_end_dt:

@@ -38,11 +38,12 @@ USER root
 # Tạo thư mục cache và scratch space cho Spark bên trong /opt/airflow.
 # Tránh sử dụng /tmp vì sticky bit có thể gây lỗi AccessDenied khi mount volume từ Windows.
 # Cấp quyền 777 để đảm bảo User airflow (50000) có toàn quyền thao tác trên dữ liệu shuffle.
-RUN mkdir -p /opt/airflow/spark_temp /opt/airflow/spark_ivy /home/airflow/.cache \
-    && chown -R airflow:root /opt/airflow/spark_temp /opt/airflow/spark_ivy /home/airflow/.cache \
+RUN mkdir -p /opt/airflow/spark_temp /opt/airflow/spark_ivy /opt/airflow/duckdb_extensions /home/airflow/.cache \
+    && chown -R airflow:root /opt/airflow/spark_temp /opt/airflow/spark_ivy /opt/airflow/duckdb_extensions /home/airflow/.cache \
     && chmod -R 775 /home/airflow/.cache \
     && chmod 777 /opt/airflow/spark_temp \
-    && chmod 777 /opt/airflow/spark_ivy
+    && chmod 777 /opt/airflow/spark_ivy \
+    && chmod 777 /opt/airflow/duckdb_extensions
 # why 775? - Cho phép user 'airflow' và nhóm 'root' có quyền đọc/ghi/xóa, trong khi vẫn cho phép các user khác đọc/execute (không có quyền ghi).
 # why not 777? - Tránh cấp quyền ghi cho tất cả mọi người, điều này có thể dẫn đến rủi ro bảo mật nếu container bị tấn công.    
 
@@ -58,6 +59,9 @@ RUN python3 -c "from pyspark.sql import SparkSession; \
 # org.apache.hadoop:hadoop-aws:3.3.4 - là gói thư viện để Spark có thể đọc/ghi dữ liệu trực tiếp từ S3 (MinIO) thông qua giao thức s3a.
 # com.amazonaws:aws-java-sdk-bundle:1.12.262 - là gói thư viện AWS SDK cần thiết để hỗ trợ các thao tác với S3 (MinIO) như xác thực, quản lý bucket, v.v.
 
-
+# Thực hiện tải sẵn các extension của DuckDB để tránh lỗi IO Error khi chạy script backfill trong container
+RUN python3 -c "import duckdb; conn = duckdb.connect(); \
+    conn.execute(\"SET extension_directory='/opt/airflow/duckdb_extensions';\"); \
+    conn.execute('INSTALL httpfs; INSTALL iceberg;')"
 # Đặt thư mục làm việc mặc định trong container là /opt/airflow, nơi Airflow sẽ tìm kiếm DAGs và các file cấu hình khác.
 WORKDIR /opt/airflow 

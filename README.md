@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/3)_Project_Data_Pipeline_Flow_Diagram.png" alt="Data Flow Diagram" width="100%">
+</p>
+
 ## 1. Project Overview
 - **Mục tiêu:** Xây dựng Data Pipeline End-to-End theo kiến trúc Lambda để thu thập, xử lý và lưu trữ dữ liệu thời tiết (Open-Meteo API) và chất lượng không khí (AQICN API) tại Hà Nội.
 - **Môi trường triển khai:** Windows 11 + WSL2 Ubuntu, 100% Containerized.
@@ -22,18 +26,13 @@
     - triển khai cơ chế "Stateful Check": Lưu lại mốc thời gian (timestamp) của lần trích xuất thành công gần nhất. Nếu dữ liệu mới lấy về có cùng timestamp với dữ liệu cũ, chúng ta sẽ bỏ qua (skip) việc đẩy vào Kafka.
 - **Batch Path:** 
     - Kéo dữ liệu raw vào MinIO (Bronze layer), sau đó dùng PySpark + Iceberg biến đổi và lưu trữ thành định dạng Parquet (Silver layer) và thực hiện Pre-aggregation/Pre-computation (Gold layer). 
-    - Phân vùng (Partitioning) theo năm/tháng.
+    - Thực hiện Phân vùng (Partitioning) theo năm/tháng/ngày.
 - **Idempotency (Tính Lũy Đẳng):** 
-    - Mọi tác vụ Airflow và PySpark phải an toàn khi chạy lại. 
+    - Mọi tác vụ Airflow và PySpark phải đảm bảo tính nhất quán và chuẩn xác của dữ liệu khi chạy lại. 
     - Sử dụng lệnh `MERGE INTO` (Upsert) của Iceberg dựa trên khóa chính (`Station_ID` + `Timestamp`) để tránh trùng lặp dữ liệu.
 - **Error Handling & Rate Limits:** 
     - Các script gọi API (Producer/Extractor) có implementation của cơ chế Retry với Exponential Backoff (dùng thư viện `tenacity`).
-
-## 4. Coding Standards (Python)
-- **Style Guide:** Tuân thủ PEP8. Viết Type Hints đầy đủ cho các hàm và phương thức.
-- **Docstrings:** Sử dụng định dạng Google Docstrings cho mọi classes và functions.
-- **Tính Module & DRY (Don't Repeat Yourself):** Tuyệt đối không copy-paste code. Logic làm sạch và biến đổi dữ liệu (Data Cleaning & Transformation) phải được tách thành các hàm dùng chung trong các module riêng biệt (ví dụ: `data_transformer.py`). Các scripts khác (như Kafka Consumer hay Backfill Script) sẽ gọi chung module này.
-- **Môi trường:** Đọc mọi thông tin nhạy cảm từ biến môi trường (Environment Variables) qua module `os` hoặc thư viện `python-dotenv`. Tuyệt đối không hardcode.
+- **Môi trường:** Thực hiện đọc mọi thông tin nhạy cảm từ biến môi trường (Environment Variables) qua module `os` hoặc thư viện `python-dotenv`. 
 
 ## 5. Optimization Strategy
 - **Tối ưu hóa Mạng (Network I/O):** 
@@ -50,11 +49,10 @@
     - Retention & Downsampling: InfluxDB tự động xóa dữ liệu cũ (sau 30 ngày) để duy trì hiệu suất hệ thống.
 
 ## 6. Backfill & Recovery Strategy
-Hệ thống sử dụng cơ chế lai (Hybrid) để đảm bảo không thất thoát dữ liệu:
 - **Batch Backfill (Airflow):** Sử dụng tính năng Catch-up của Airflow kết hợp tham số `logical_date` qua Jinja Templates. Cơ chế Upsert của Iceberg (`MERGE INTO`) đảm bảo an toàn tuyệt đối khi chạy lại pipeline.
-- **Streaming Backfill (Bảo vệ Luồng Live):** 
+- **Streaming Backfill (Airflow):** 
     - KHÔNG đẩy dữ liệu quá khứ vào Kafka Consumer đang chạy thời gian thực để tránh "tắc đường" (bottleneck).
     - Viết script Backfill độc lập, sử dụng module biến đổi dữ liệu dùng chung, và ghi đè thẳng vào InfluxDB với mốc Timestamp gốc.
 - **Nguồn Dữ liệu Backfill cho Streaming:**
-    - *Phục hồi dữ liệu ngày cũ:* Ưu tiên lấy dữ liệu từ SSOT (Single Source of Truth) là các file Parquet trong MinIO (Iceberg). Điều này tiết kiệm API Calls, tăng tốc I/O và đảm bảo tính nhất quán tuyệt đối giữa Batch và Streaming.
-    - *Phục hồi dữ liệu trong ngày (Intraday gap):* Khi dữ liệu chưa kịp vào MinIO, script tự động dự phòng bằng cách gọi tính năng "Past Hours" của API (i.e. trong Open-Meteo Weather, và Open-Meteo Air Quality) để điền bù tức thì, đảm bảo Dashboard luôn liền mạch.
+    - *Phục hồi dữ liệu ngày cũ:* Ưu tiên lấy dữ liệu từ SSOT (Single Source of Truth) là các file Parquet trong MinIO (Iceberg).
+    - *Phục hồi dữ liệu trong ngày (Intraday gap):* Khi dữ liệu chưa kịp vào MinIO, script tự động dự phòng bằng cách gọi tính năng "Past Hours" của API (i.e. trong Open-Meteo Weather, và Open-Meteo Air Quality).
