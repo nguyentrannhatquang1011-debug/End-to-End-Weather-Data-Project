@@ -7,17 +7,17 @@
 - **Môi trường triển khai:** Windows 11 + WSL2 Ubuntu, 100% Containerized.
 - **Tài nguyên phần cứng:** 8 Cores CPU, 16GB RAM. 
 
-## 2. Technology Stack & Strict Versions
+## 2. Technology Stack
 - **Ngôn ngữ:** Python 3.10+
 - **Infrastructure:** Docker & Docker Compose
 - **Orchestration:** Apache Airflow v2.8.1 (LocalExecutor)
-- **Message Broker:** Apache Kafka apache/kafka:3.7.0 (Chạy ở chế độ KRaft)
+- **Message Broker:** Apache Kafka v3.7.0 (Chạy ở chế độ KRaft)
 - **Data Lake/Object Storage:** MinIO (S3-compatible)
 - **Time-Series DB (Streaming):** InfluxDB v2.7
-- **Data Processing (Batch):** PySpark
+- **Data Processing (Batch):** PySpark v3.5.0
 - **Table Format:** Apache Iceberg
-- **Serving/OLAP:** DuckDB
-- **Dashboard:** Streamlit
+- **Serving/OLAP:** DuckDB v1.1.3
+- **Dashboard:** Streamlit v1.31.1
 
 ## 3. Architecture Design
 - **Streaming Path:** 
@@ -32,7 +32,7 @@
     - Sử dụng lệnh `MERGE INTO` (Upsert) của Iceberg dựa trên khóa chính (`Station_ID` + `Timestamp`) để tránh trùng lặp dữ liệu.
 - **Error Handling & Rate Limits:** 
     - Các script gọi API (Producer/Extractor) có implementation của cơ chế Retry với Exponential Backoff (dùng thư viện `tenacity`).
-- **Môi trường:** Thực hiện đọc mọi thông tin nhạy cảm từ biến môi trường (Environment Variables) qua module `os` hoặc thư viện `python-dotenv`. 
+- **Môi trường:** Thực hiện đọc mọi thông tin nhạy cảm từ biến môi trường (Environment Variables) qua thư viện `python-dotenv`. 
 
 ## 5. Optimization Strategy
 - **Tối ưu hóa Mạng (Network I/O):** 
