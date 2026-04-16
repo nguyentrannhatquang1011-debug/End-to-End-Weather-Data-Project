@@ -21,18 +21,19 @@
 
 ## 3. Architecture Design
 - **Streaming Path:** 
-    - Sử dụng Python thuần (requests, confluent-kafka, influxdb-client), không dùng Spark Streaming.
-    - Consumer phải thiết lập `enable.auto.commit=False` và chỉ commit offset sau khi ghi thành công vào InfluxDB (At-least-once delivery).
-    - triển khai cơ chế "Stateful Check": Lưu lại mốc thời gian (timestamp) của lần trích xuất thành công gần nhất. Nếu dữ liệu mới lấy về có cùng timestamp với dữ liệu cũ, chúng ta sẽ bỏ qua (skip) việc đẩy vào Kafka.
+    - Sử dụng Python Native Consumer để xử lý dữ liệu.
+    - Trong Consumer thiết lập `enable.auto.commit=False` và chỉ commit offset sau khi ghi thành công vào InfluxDB (At-least-once delivery).
+    - triển khai cơ chế "Stateful Check": Lưu lại mốc thời gian (timestamp) của lần trích xuất thành công gần nhất. Nếu dữ liệu mới lấy về có cùng timestamp với dữ liệu cũ, bỏ qua không đẩy vào Kafka.
 - **Batch Path:** 
-    - Kéo dữ liệu raw vào MinIO (Bronze layer), sau đó dùng PySpark + Iceberg biến đổi và lưu trữ thành định dạng Parquet (Silver layer) và thực hiện Pre-aggregation/Pre-computation (Gold layer). 
-    - Thực hiện Phân vùng (Partitioning) theo năm/tháng/ngày.
+    - Kéo dữ liệu raw vào MinIO (Bronze layer), sau đó dùng PySpark + Iceberg làm sạch, schema enforcement và lưu trữ thành định dạng Parquet (Silver layer) và thực hiện Pre-aggregation/Pre-computation (Gold layer). 
+    - Thực hiện Phân vùng (Partitioning) theo thời gian.
 - **Idempotency (Tính Lũy Đẳng):** 
-    - Mọi tác vụ Airflow và PySpark phải đảm bảo tính nhất quán và chuẩn xác của dữ liệu khi chạy lại. 
-    - Sử dụng lệnh `MERGE INTO` (Upsert) của Iceberg dựa trên khóa chính (`Station_ID` + `Timestamp`) để tránh trùng lặp dữ liệu.
+    - Mọi tác vụ Airflow và PySpark được thiết kế để đảm bảo tính nhất quán và chuẩn xác của dữ liệu khi chạy lại. 
+    - Thực hiện qua sử dụng lệnh `MERGE INTO` (Upsert) của Iceberg dựa trên khóa chính (`Station_ID` + `Timestamp`) để tránh trùng lặp dữ liệu.
 - **Error Handling & Rate Limits:** 
-    - Các script gọi API (Producer/Extractor) có implementation của cơ chế Retry với Exponential Backoff (dùng thư viện `tenacity`).
-- **Môi trường:** Thực hiện đọc mọi thông tin nhạy cảm từ biến môi trường (Environment Variables) qua thư viện `python-dotenv`. 
+    - Cấu hình trong các script gọi API (Producer/Extractor) các cơ chế Retry với Exponential Backoff (dùng thư viện `tenacity`).
+- **Bảo mật:**
+    - Thực hiện đọc mọi thông tin nhạy cảm từ biến môi trường (Environment Variables) qua thư viện `python-dotenv`. 
 
 ## 5. Optimization Strategy
 - **Tối ưu hóa Mạng (Network I/O):** 
